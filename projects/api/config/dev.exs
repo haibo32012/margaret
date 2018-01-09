@@ -45,5 +45,5 @@ config :margaret, Margaret.Repo,
   username: "postgres",
   password: "postgres",
   database: "margaret_dev",
-  hostname: "postgres",
+  hostname: "localhost",
   pool_size: 10

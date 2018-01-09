@@ -52,7 +52,7 @@ config :margaret, MargaretWeb.Guardian,
 # Configures Exq
 config :exq,
   name: Exq,
-  host: "redis",
+  host: "127.0.0.1",
   port: 6379,
   namespace: "exq",
   concurrency: 500,
