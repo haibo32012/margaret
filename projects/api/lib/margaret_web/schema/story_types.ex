@@ -9,11 +9,11 @@ defmodule MargaretWeb.Schema.StoryTypes do
   alias MargaretWeb.{Resolvers, Middleware}
 
   @desc """
-  The publish status of a story.
+  The audience of a story.
   """
-  enum :story_publish_status do
-    value :public
-    value :draft
+  enum :story_audience do
+    value :all
+    value :members
     value :unlisted
   end
 
@@ -41,14 +41,16 @@ defmodule MargaretWeb.Schema.StoryTypes do
   """
   node object :story do
     @desc "The title of the story."
-    field :title, non_null(:string)
+    field :title, non_null(:string) do
+      resolve &Resolvers.Stories.resolve_title/3
+    end
 
-    @desc "The body of the story."
-    field :body, non_null(:string)
+    @desc "The content of the story."
+    field :content, non_null(:json)
 
     @desc "The author of the story."
     field :author, non_null(:user) do
-      resolve &Resolvers.Accounts.resolve_user/3
+      resolve &Resolvers.Stories.resolve_author/3
     end
 
     @desc "The slug of the story."
@@ -89,45 +91,45 @@ defmodule MargaretWeb.Schema.StoryTypes do
     @desc "Identifies the date and time when the story was published."
     field :published_at, :naive_datetime
 
-    field :publish_status, non_null(:story_publish_status)
+    field :audience, non_null(:story_audience)
 
     field :license, non_null(:story_license)
 
     field :viewer_can_star, non_null(:boolean) do
-      middleware Middleware.Authenticated, resolve: false
+      middleware Middleware.RequireAuthenticated, resolve: false
       resolve &Resolvers.Stories.resolve_viewer_can_star/3
     end
 
     field :viewer_has_starred, non_null(:boolean) do
-      middleware Middleware.Authenticated, resolve: false
+      middleware Middleware.RequireAuthenticated, resolve: false
       resolve &Resolvers.Stories.resolve_viewer_has_starred/3
     end
 
     field :viewer_can_bookmark, non_null(:boolean) do
-      middleware Middleware.Authenticated, resolve: false
+      middleware Middleware.RequireAuthenticated, resolve: false
       resolve &Resolvers.Stories.resolve_viewer_can_bookmark/3
     end
 
     field :viewer_has_bookmarked, non_null(:boolean) do
-      middleware Middleware.Authenticated, resolve: false
+      middleware Middleware.RequireAuthenticated, resolve: false
       resolve &Resolvers.Stories.resolve_viewer_has_bookmarked/3
     end
 
     @desc "Check if the current viewer can comment this story."
     field :viewer_can_comment, non_null(:boolean) do
-      middleware Middleware.Authenticated, resolve: false
+      middleware Middleware.RequireAuthenticated, resolve: false
       resolve &Resolvers.Stories.resolve_viewer_can_comment/3
     end
 
     @desc "Check if the current viewer can update this story."
     field :viewer_can_update, non_null(:boolean) do
-      middleware Middleware.Authenticated, resolve: false
+      middleware Middleware.RequireAuthenticated, resolve: false
       resolve &Resolvers.Stories.resolve_viewer_can_update/3
     end
 
     @desc "Check if the current viewer can delete this story."
     field :viewer_can_delete, non_null(:boolean) do
-      middleware Middleware.Authenticated, resolve: false
+      middleware Middleware.RequireAuthenticated, resolve: false
       resolve &Resolvers.Stories.resolve_viewer_can_delete/3
     end
 
@@ -152,13 +154,12 @@ defmodule MargaretWeb.Schema.StoryTypes do
     @desc "Creates a story."
     payload field :create_story do
       input do
-        field :title, non_null(:string)
-        field :body, non_null(:string)
-        field :summary, :string
+        field :content, non_null(:json)
         field :publication_id, :id
+        field :audience, non_null(:story_audience)
         field :tags, list_of(:string)
-        field :publish_status, non_null(:story_publish_status)
         field :license, non_null(:story_license)
+        field :publish_at, :naive_datetime
       end
 
       output do
@@ -173,12 +174,12 @@ defmodule MargaretWeb.Schema.StoryTypes do
     payload field :update_story do
       input do
         field :story_id, non_null(:id)
-        field :title, :string
-        field :body, :string
-        field :summary, :string
-        field :publish_status, :story_publish_status
-        field :license, :story_license
+        field :content, :json
+        field :publication_id, :id
+        field :audience, :story_audience
         field :tags, list_of(:string)
+        field :license, :story_license
+        field :publish_at, :naive_datetime
       end
 
       output do

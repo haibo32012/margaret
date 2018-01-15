@@ -4,10 +4,13 @@ defmodule Margaret.Accounts do
   """
 
   import Ecto.Query
+  alias Ecto.Multi
 
   alias Margaret.{Repo, Accounts, Publications}
   alias Accounts.{User, SocialLogin, Follow}
   alias Publications.PublicationMembership
+
+  @seconds_before_user_deletion 60 * 60 * 24 * 15 # 15 days.
 
   @doc """
   Gets a single user.
@@ -23,13 +26,9 @@ defmodule Margaret.Accounts do
   """
   @spec get_user(String.t | non_neg_integer, Keyword.t) :: User.t | nil
   def get_user(id, opts \\ []) do
-    query = from u in User
-
-    unless Keyword.get(opts, :include_deactivated, false) do
-      query = where(query, [u], u.is_active == true)
-    end
-
-    Repo.get_by(query, id)
+    User
+    |> maybe_include_deactivated(opts)
+    |> Repo.get(id)
   end
 
   @doc """
@@ -48,13 +47,9 @@ defmodule Margaret.Accounts do
   """
   @spec get_user!(String.t | non_neg_integer, Keyword.t) :: User.t | no_return
   def get_user!(id, opts \\ []) do
-    query = from u in User
-
-    unless Keyword.get(opts, :include_deactivated, false) do
-      query = where(query, [u], u.is_active == true)
-    end
-
-    Repo.get!(query, id)
+    User
+    |> maybe_include_deactivated(opts)
+    |> Repo.get!(id)
   end
 
   @doc """
@@ -74,11 +69,9 @@ defmodule Margaret.Accounts do
     query = from u in User,
       where: u.username == ^username
 
-    unless Keyword.get(opts, :include_deactivated, false) do
-      query = where(query, [u], u.is_active == true)
-    end
-
-    Repo.one(query)
+    query
+    |> maybe_include_deactivated(opts)
+    |> Repo.one()
   end
 
   @doc """
@@ -100,11 +93,9 @@ defmodule Margaret.Accounts do
     query = from u in User,
       where: u.username == ^username
 
-    unless Keyword.get(opts, :include_deactivated, false) do
-      query = where(query, [u], u.is_active == true)
-    end
-
-    Repo.one!(query)
+    query
+    |> maybe_include_deactivated(opts)
+    |> Repo.one!()
   end
 
   @doc """
@@ -124,11 +115,9 @@ defmodule Margaret.Accounts do
     query = from u in User,
       where: u.email == ^email
 
-    unless Keyword.get(opts, :include_deactivated, false) do
-      query = where(query, [u], u.is_active == true)
-    end
-
-    Repo.one(query)
+    query
+    |> maybe_include_deactivated(opts)
+    |> Repo.one()
   end
 
   @doc """
@@ -150,11 +139,9 @@ defmodule Margaret.Accounts do
     query = from u in User,
       where: u.email == ^email
 
-    unless Keyword.get(opts, :include_deactivated, false) do
-      query = where(query, [u], u.is_active == true)
-    end
-
-    Repo.one!(query)
+    query
+    |> maybe_include_deactivated(opts)
+    |> Repo.one!()
   end
 
   @doc """
@@ -173,15 +160,13 @@ defmodule Margaret.Accounts do
   """
   @spec get_user_by_social_login!({atom, String.t}) :: User.t | nil
   def get_user_by_social_login!({provider, uid}, opts \\ []) do
-    query = from s in SocialLogin,
-      join: u in User, on: u.id == s.user_id,
-      select: u
+    query = from u in User,
+      join: s in SocialLogin, on: s.user_id == u.id,
+      where: s.provider == ^provider and s.uid == ^uid
 
-    unless Keyword.get(opts, :include_deactivated, false) do
-      query = where(query, [u], u.is_active == true)
-    end
-
-    Repo.one(query)
+    query
+    |> maybe_include_deactivated(opts)
+    |> Repo.one()
   end
 
   @doc """
@@ -194,14 +179,29 @@ defmodule Margaret.Accounts do
 
   """
   @spec get_user_count :: non_neg_integer
-  def get_user_count do
+  def get_user_count(opts \\ []) do
     query = from u in User,
-      where: u.is_active == true,
       select: count(u.id)
 
-    Repo.one!(query)
+    query
+    |> maybe_include_deactivated(opts)
+    |> Repo.one!()
   end
 
+
+  defp maybe_include_deactivated(query, opts) do
+    opts
+    |> Keyword.get(:include_deactivated, false)
+    |> do_maybe_include_deactivated(query)
+  end
+
+  defp do_maybe_include_deactivated(false, query) do
+    from u in query, where: is_nil(u.deactivated_at)
+  end
+
+  defp do_maybe_include_deactivated(true, query), do: query
+
+  def member?(%User{}), do: false
 
   @doc """
   Inserts a user.
@@ -246,19 +246,11 @@ defmodule Margaret.Accounts do
   @doc """
   Updates a user.
   """
-  def update_user(user_id, attrs) when is_integer(user_id) or is_binary(user_id) do
-    user_id
-    |> get_user()
-    |> update_user(attrs)
-  end
-
   def update_user(%User{} = user, attrs) do
     user
     |> User.changeset(attrs)
     |> Repo.update()
   end
-
-  def update_user(nil, _), do: nil
 
   @doc """
   Deletes a user.
@@ -269,6 +261,25 @@ defmodule Margaret.Accounts do
   Deletes a user.
   """
   def delete_user!(%User{} = user), do: Repo.delete!(user)
+
+  @doc """
+  Marks a user for deletion.
+
+  Enqueues a task that deletes the account and all its content
+  after the specified time has passed.
+  """
+  def mark_user_for_deletion(%User{id: user_id} = user, seconds \\ @seconds_before_user_deletion) do
+    user_changeset = User.changeset(user, %{})
+
+    schedule_deletion = fn _ ->
+      Exq.enqueue_in(Exq, "user_deletion", seconds, MargaretWeb.Workers.DeleteAccount, [user_id])
+    end
+
+    Multi.new()
+    |> Multi.update(:deactivate_user, user_changeset)
+    |> Multi.run(:schedule_deletion, schedule_deletion)
+    |> Repo.transaction()
+  end
 
   @doc """
   Inserts a social login.

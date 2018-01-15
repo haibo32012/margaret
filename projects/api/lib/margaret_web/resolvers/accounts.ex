@@ -24,7 +24,6 @@ defmodule MargaretWeb.Resolvers.Accounts do
   Resolves a user by its username.
   """
   def resolve_user(%{username: username}, _), do: {:ok, Accounts.get_user_by_username(username)}
-  def resolve_user(%Story{author_id: author_id}, _, _), do: {:ok, Accounts.get_user(author_id)}
 
   @doc """
   Resolves a connection of stories of a user.
@@ -44,7 +43,8 @@ defmodule MargaretWeb.Resolvers.Accounts do
   def resolve_stories(%User{id: author_id}, args, _) do
     query = from s in Story,
       where: s.author_id == ^author_id,
-      where: s.publish_status == ^:public
+      where: s.audience == ^:all,
+      where: s.published_at >= ^NaiveDateTime.utc_now()
 
     Relay.Connection.from_query(query, &Repo.all/1, args)
   end
@@ -57,7 +57,7 @@ defmodule MargaretWeb.Resolvers.Accounts do
   def resolve_followers(%User{id: user_id}, args, _) do
     query = from u in User,
       join: f in Follow, on: f.follower_id == u.id,
-      where: u.is_active == true,
+      where: is_nil(u.deactivated_at),
       where: f.user_id == ^user_id,
       select: {u, f.inserted_at}
 
@@ -85,7 +85,7 @@ defmodule MargaretWeb.Resolvers.Accounts do
       left_join: u in User, on: u.id == f.user_id,
       left_join: p in Publication, on: p.id == f.publication_id,
       where: f.follower_id == ^user_id,
-      where: u.is_active == true,
+      where: is_nil(u.deactivated_at),
       select: {u, p, f.inserted_at}
 
     {:ok, connection} = Relay.Connection.from_query(query, &Repo.all/1, args)
@@ -147,7 +147,7 @@ defmodule MargaretWeb.Resolvers.Accounts do
 
   Bookmarks are only visible to the user who bookmarked.
   """
-  def resolve_bookmarked( %User{id: user_id}, args, %{context: %{viewer: %{id: user_id}}}) do
+  def resolve_bookmarked(%User{id: user_id}, args, %{context: %{viewer: %{id: user_id}}}) do
     query = from b in Bookmark,
       left_join: s in Story, on: s.id == b.story_id,
       left_join: c in Comment, on: c.id == b.comment_id,
@@ -222,7 +222,7 @@ defmodule MargaretWeb.Resolvers.Accounts do
   """
   def resolve_users(args, _) do
     query = from u in User,
-      where: u.is_active == true
+      where: is_nil(u.deactivated_at)
 
     {:ok, connection} = Relay.Connection.from_query(query, &Repo.all/1, args)
 
@@ -245,7 +245,7 @@ defmodule MargaretWeb.Resolvers.Accounts do
   end
 
   def resolve_deactivate_viewer(_, %{context: %{viewer: viewer}}) do
-    do_resolve_update_user(viewer, %{is_active: false})
+    do_resolve_update_user(viewer, %{deactivated_at: NaiveDateTime.utc_now()})
   end
 
   defp do_resolve_update_user(user, attrs) do

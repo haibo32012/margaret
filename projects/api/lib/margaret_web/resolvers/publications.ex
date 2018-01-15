@@ -32,7 +32,7 @@ defmodule MargaretWeb.Resolvers.Publications do
   def resolve_members(%Publication{id: publication_id}, args, _) do
     query = from u in User,
       join: pm in PublicationMembership, on: pm.member_id == u.id,
-      where: u.is_active == true,
+      where: is_nil(u.deactivated_at),
       where: pm.publication_id == ^publication_id,
       select: {u, pm.role, pm.inserted_at}
 
@@ -72,7 +72,7 @@ defmodule MargaretWeb.Resolvers.Publications do
   def resolve_followers(%Publication{id: publication_id}, args, _) do
     query = from u in User,
       join: f in Follow, on: f.follower_id == u.id,
-      where: u.is_active == true,
+      where: is_nil(u.deactivated_at),
       where: f.publication_id == ^publication_id,
       select: {u, f.inserted_at}
 
@@ -90,6 +90,15 @@ defmodule MargaretWeb.Resolvers.Publications do
       |> Map.put(:total_count, Accounts.get_follower_count(%{publication_id: publication_id}))
 
     {:ok, connection}
+  end
+
+  def resolve_tags(%Publication{} = publication, _, _) do
+    tags =
+      publication
+      |> Repo.preload(:tags)
+      |> Map.get(:tags)
+
+    {:ok, tags}
   end
 
   @doc """
@@ -116,14 +125,14 @@ defmodule MargaretWeb.Resolvers.Publications do
   Resolves whether the user is a member of the publication.
   """
   def resolve_viewer_is_a_member(%{id: publication_id}, _, %{context: %{viewer: viewer}}) do
-    {:ok, Publications.is_publication_member?(publication_id, viewer.id)}
+    {:ok, Publications.publication_member?(publication_id, viewer.id)}
   end
 
   @doc """
   Resolves whether the user can administer the publication.
   """
   def resolve_viewer_can_administer(%{id: publication_id}, _, %{context: %{viewer: viewer}}) do
-    {:ok, Publications.is_publication_admin?(publication_id, viewer.id)}
+    {:ok, Publications.publication_admin?(publication_id, viewer.id)}
   end
 
   @doc """
@@ -158,10 +167,31 @@ defmodule MargaretWeb.Resolvers.Publications do
   Resolves the update of a publication.
   """
   def resolve_update_publication(
-    %{publication_id: _publication_id}, %{context: %{viewer: %{id: _viewer_id}}}
+    %{publication_id: publication_id} = args, %{context: %{viewer: %{id: viewer_id}}}
   ) do
-    Helpers.GraphQLErrors.not_implemented()
+    args = Map.delete(args, :publication_id)
+
+    publication_id
+    |> Publications.can_update_publication?(viewer_id)
+    |> do_resolve_update_publication(publication_id, args)
   end
+
+  defp do_resolve_update_publication(true, publication_id, attrs) do
+    publication_id
+    |> Publications.get_publication()
+    |> do_resolve_update_publication(attrs)
+  end
+
+  defp do_resolve_update_publication(false, _, _), do: Helpers.GraphQLErrors.unauthorized()
+
+  defp do_resolve_update_publication(%Publication{} = publication, attrs) do
+    case Publications.update_publication(publication, attrs) do
+      {:ok, %{publication: publication}} -> {:ok, %{publication: publication}}
+      {:error, _, reason, _} -> {:error, reason}
+    end
+  end
+
+  defp do_resolve_update_publication(nil, _), do: Helpers.GraphQLErrors.publication_doesnt_exist()
   
   @doc """
   Resolves the kick of a publication member.
@@ -173,8 +203,8 @@ defmodule MargaretWeb.Resolvers.Publications do
   end
 
   def resolve_kick_member(
-    %{member_id: member_id}, %{context: %{viewer: %{id: viewer_id}}}
-  ) when member_id === viewer_id do
+    %{member_id: member_id}, %{context: %{viewer: %{id: member_id}}}
+  ) do
     {:error, "You can't kick yourself."}
   end
 
@@ -183,7 +213,7 @@ defmodule MargaretWeb.Resolvers.Publications do
     %{context: %{viewer: %{id: viewer_id}}}
   ) do
     publication_id
-    |> Publications.is_publication_admin?(viewer_id)
+    |> Publications.publication_admin?(viewer_id)
     |> do_resolve_kick_member(publication_id, member_id)
   end
 
@@ -208,11 +238,11 @@ defmodule MargaretWeb.Resolvers.Publications do
     %{context: %{viewer: %{id: viewer_id}}}
   ) do
     publication_id
-    |> Publications.is_publication_owner?(viewer_id)
+    |> Publications.publication_owner?(viewer_id)
     |> do_resolve_leave_publication(publication_id, viewer_id)
   end
 
-  defp do_resolve_leave_publication(true, publication_id, member_id) do
+  defp do_resolve_leave_publication(true, _publication_id, _member_id) do
 
   end
 

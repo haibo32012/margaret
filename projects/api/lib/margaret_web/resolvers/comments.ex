@@ -23,7 +23,7 @@ defmodule MargaretWeb.Resolvers.Comments do
   def resolve_stargazers(%Comment{id: comment_id}, args, _) do
     query = from u in User,
       join: s in Star, on: s.user_id == u.id, 
-      where: u.is_active == true,
+      where: is_nil(u.deactivated_at),
       where: s.comment_id == ^comment_id,
       select: {u, s.inserted_at}
 
@@ -67,7 +67,7 @@ defmodule MargaretWeb.Resolvers.Comments do
     {:ok, connection} = Relay.Connection.from_query(query, &Repo.all/1, args)
 
     connection =
-      Map.put(connection, :total_count, Comments.get_comment_count(comment_id: comment_id))
+      Map.put(connection, :total_count, Comments.get_comment_count(%{comment_id: comment_id}))
 
     {:ok, connection}
   end

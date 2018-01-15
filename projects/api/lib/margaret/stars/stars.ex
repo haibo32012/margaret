@@ -4,9 +4,10 @@ defmodule Margaret.Stars do
   """
 
   import Ecto.Query
-  alias Margaret.Repo
 
-  alias Margaret.Stars.Star
+  alias Margaret.{Repo, Accounts, Stars}
+  alias Accounts.User
+  alias Stars.Star
 
   @doc """
   Gets a star.
@@ -39,18 +40,11 @@ defmodule Margaret.Stars do
     end
   end
 
-  def delete_star(args) do
-    case get_star(args) do
-      %Star{id: id} -> delete_star(id)
-      nil -> nil
-    end
-  end
-
   def get_star_count(%{story_id: story_id}) do
     query = from s in Star,
       join: u in User, on: u.id == s.user_id,
       where: s.story_id == ^story_id,
-      where: u.is_active == true,
+      where: is_nil(u.deactivated_at),
       select: count(s.id)
 
     Repo.one!(query)
@@ -60,13 +54,17 @@ defmodule Margaret.Stars do
     query = from s in Star,
       join: u in User, on: u.id == s.user_id,
       where: s.comment_id == ^comment_id,
-      where: u.is_active == true,
+      where: is_nil(u.deactivated_at),
       select: count(s.id)
 
     Repo.one!(query)
   end
 
   def get_starred_count(user_id) do
-    Repo.one!(from s in Star, where: s.user_id == ^user_id, select: count(s.id))
+    query = from s in Star,
+      where: s.user_id == ^user_id,
+      select: count(s.id)
+
+    Repo.one!(query)
   end
 end

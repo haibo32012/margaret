@@ -6,7 +6,7 @@ defmodule MargaretWeb.Schema.CommentableTypes do
   use Absinthe.Schema.Notation
   use Absinthe.Relay.Schema.Notation, :modern
 
-  alias MargaretWeb.{Resolvers, Middleware}
+  alias MargaretWeb.Resolvers
 
   @commentable_implementations [
     :story,
@@ -30,7 +30,7 @@ defmodule MargaretWeb.Schema.CommentableTypes do
     payload field :comment do
       input do
         field :commentable_id, non_null(:id)
-        field :body, non_null(:string)
+        field :content, non_null(:json)
       end
 
       output do

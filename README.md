@@ -5,15 +5,24 @@
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](CONTRIBUTING.md)
 [![styled with prettier](https://img.shields.io/badge/styled_with-prettier-ff69b4.svg?style=flat-square)](https://github.com/prettier/prettier)
 
+This is the umbrella repository of Margaret.
+
 ## Table of contents
 
 * [Introduction](#introduction)
+* [Contributing](#contributing)
 * [Projects](#projects)
 * [License](#license)
 
 ## Introduction
 
-This is the umbrella repository of Margaret.
+Margaret is an open-source publishing platform (think of [Medium](https://medium.com)).
+The initial scope is to implement the majority
+of features Medium has. In the future, we'll implement features that will set Margaret apart.
+
+## Contributing
+
+Please see [CONTRIBUTING](./CONTRIBUTING.md).
 
 ## Projects
 

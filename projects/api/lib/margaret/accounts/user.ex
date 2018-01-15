@@ -5,10 +5,9 @@ defmodule Margaret.Accounts.User do
   import Ecto.Changeset
 
   alias __MODULE__
-  alias Margaret.{Accounts, Stories, Publications, Stars, Bookmarks}
+  alias Margaret.{Accounts, Stories, Stars, Bookmarks}
   alias Accounts.{SocialLogin, Follow}
   alias Stories.Story
-  alias Publications.{Publication, PublicationMembership}
   alias Stars.Star
   alias Bookmarks.Bookmark
 
@@ -19,7 +18,7 @@ defmodule Margaret.Accounts.User do
     :email,
     :is_admin,
     :is_employee,
-    :is_active,
+    :deactivated_at,
   ]
 
   @required_attrs [
@@ -38,7 +37,7 @@ defmodule Margaret.Accounts.User do
     field :is_admin, :boolean
     field :is_employee, :boolean
 
-    field :is_active, :boolean
+    field :deactivated_at, :naive_datetime
 
     has_many :social_logins, SocialLogin
 

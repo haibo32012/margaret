@@ -1,20 +1,77 @@
-# Margaret
+# Margaret API
 
-To start your Phoenix server:
+## Table of contents
 
-* Install dependencies with `mix deps.get`
-* Create and migrate your database with `mix ecto.create && mix ecto.migrate`
-* Start Phoenix endpoint with `mix phx.server`
+* [Introduction](#introduction)
+* [Project Structure](#project-structure)
 
-Now you can visit [http://api.localhost/](http://api.localhost) from your browser.
+## Introduction
 
-Ready to run in production?
-Please [check our deployment guides](http://www.phoenixframework.org/docs/deployment).
+The Margaret API is a GraphQL API built with
+[Elixir](https://elixir-lang.org/),
+[Phoenix](https://hexdocs.pm/phoenix/overview.html),
+[Ecto](https://hexdocs.pm/ecto/Ecto.html),
+[Absinthe](https://hexdocs.pm/absinthe/overview.html)
+and [Absinthe Relay](https://hexdocs.pm/absinthe_relay/Absinthe.Relay.html).
 
-## Learn more
+For background tasks we use [Exq](https://hexdocs.pm/exq/readme.html).
 
-* Official website: [http://www.phoenixframework.org/](http://www.phoenixframework.org/)
-* Guides: [http://phoenixframework.org/docs/overview](http://phoenixframework.org/docs/overview)
-* Docs: [https://hexdocs.pm/phoenix](https://hexdocs.pm/phoenix)
-* Mailing list: [http://groups.google.com/group/phoenix-talk](http://groups.google.com/group/phoenix-talk)
-* Source: [https://github.com/phoenixframework/phoenix](https://github.com/phoenixframework/phoenix)
+We try to comply with the
+[Relay Graphql Server Specification](https://facebook.github.io/relay/docs/en/graphql-server-specification.html) whenever possible.
+
+## Project structure
+
+* **`config`**: Contains the configuration files for the Elixir application
+  for different environments.
+
+* **`lib`**: Contains the source code.
+
+  * **`margaret`**: Contains the business logic and storage details.
+    Each folder is a context.
+
+  * **`margaret_web`**: Contains the all the modules related to the web layer.
+
+    * **`channels`**: Contains Phoenix channels.
+
+    * **`controllers`**: Contains web controllers and actions.
+      Since we are building a GraphQL application we don't use controllers, we use resolvers.
+      But some functionality has to be outside of GraphQL. Oauth2 sign in, for example.
+
+    * **`helpers`**: Contains modules with helper functions.
+
+    * **`middleware`**: Contains GraphQL middleware.
+
+    * **`pipelines`**: Contains Plug custom pipelines.
+
+    * **`resolvers`**: Contains GraphQL resolvers.
+
+    * **`schema`**: Contains Graphql type, query, mutation and subscription definitions.
+
+    * **`views`**: Contains Phoenix views. We don't use them though.
+
+    * **`workers`**: Contains workers that perform tasks enqueued with `Exq`.
+
+    * `context.ex`: Builds the GraphQL context from data from each request.
+      Here we put the user struct in the context if the viewer is logged in, for example.
+
+    * `endpoint.ex`: The Phoenix endpoint.
+
+    * `guardian.ex`: Callback module for `Guardian`.
+
+    * `helpers.ex`: Helper functions.
+
+    * `router.ex`: The Phoenix router.
+
+    * `schema.ex`: The GraphQL schema definition.
+
+  * **`mix`**: Contains modules related to the Mix build system.
+
+    * **`tasks`**: Contains custom Mix tasks.
+
+* **`priv`**:
+
+  * **`repo`**: Contains all the database migration files.
+
+  * `seeds.ex`: Contains the initial data to populate the database with.
+
+* **`test`**: Contains all the tests.
