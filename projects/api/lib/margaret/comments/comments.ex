@@ -70,21 +70,18 @@ defmodule Margaret.Comments do
     do_get_comment_count(query)
   end
 
-<<<<<<< HEAD
   def get_comment_count(comment_id: comment_id) do
     query = from c in Comment,
       join: u in User, on: u.id == c.author_id,
       where: c.parent_id == ^comment_id,
       where: u.is_active == true,
       select: count(c.id)
-=======
   defp do_get_comment_count(query) do
     query =
       from c in query,
         join: u in User, on: u.id == c.author_id,
         where: is_nil(u.deactivated_at),
         select: count(c.id)
->>>>>>> 6396d85776f72a7b3d010b6e0653a51ebd9f082b
 
     Repo.one!(query)
   end
