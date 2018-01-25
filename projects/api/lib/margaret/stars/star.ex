@@ -15,25 +15,25 @@ defmodule Margaret.Stars.Star do
   @permitted_attrs [
     :user_id,
     :story_id,
-    :comment_id,
+    :comment_id
   ]
 
   @required_attrs [
-    :user_id,
+    :user_id
   ]
 
   schema "stars" do
-    belongs_to :user, User
+    belongs_to(:user, User)
 
-    belongs_to :story, Story
-    belongs_to :comment, Comment
+    belongs_to(:story, Story)
+    belongs_to(:comment, Comment)
 
     timestamps()
   end
 
   @doc false
-  def changeset(%Star{} = star, attrs) do
-    star
+  def changeset(attrs) do
+    %Star{}
     |> cast(attrs, @permitted_attrs)
     |> validate_required(@required_attrs)
     |> foreign_key_constraint(:user_id)

@@ -63,40 +63,37 @@ defmodule MargaretWeb.Resolvers.Stories do
   Resolves the stargazers of the story.
   """
   def resolve_stargazers(%Story{id: story_id}, args, _) do
-    query = from u in User,
-      join: s in Star, on: s.user_id == u.id, 
-      where: is_nil(u.deactivated_at),
-      where: s.story_id == ^story_id,
-      select: {u, s.inserted_at}
+    query =
+      from(
+        u in User,
+        join: s in Star,
+        on: s.user_id == u.id,
+        where: is_nil(u.deactivated_at),
+        where: s.story_id == ^story_id,
+        select: {u, %{starred_at: s.inserted_at}}
+      )
 
-    {:ok, connection} = Relay.Connection.from_query(query, &Repo.all/1, args)
+    total_count = Stars.get_story_star_count(story_id)
 
-    transform_edges = &Enum.map &1, fn %{node: {user, starred_at}} = edge ->
-      edge
-      |> Map.put(:starred_at, starred_at)
-      |> Map.update!(:node, fn _ -> user end)
-    end
-
-    connection =
-      connection
-      |> Map.update!(:edges, transform_edges)
-      |> Map.put(:total_count, Stars.get_star_count(%{story_id: story_id}))
-
-    {:ok, connection}
+    query
+    |> Relay.Connection.from_query(&Repo.all/1, args)
+    |> Helpers.transform_connection(total_count: total_count)
   end
 
   def resolve_comments(%Story{id: story_id}, args, _) do
-    query = from c in Comment,
-      join: u in User,
-      where: c.story_id == ^story_id,
-      where: is_nil(u.deactivated_at)
+    query =
+      from(
+        c in Comment,
+        join: u in User,
+        where: c.story_id == ^story_id,
+        where: is_nil(u.deactivated_at)
+      )
 
-    {:ok, connection} = Relay.Connection.from_query(query, &Repo.all/1, args)
+    total_count = Comments.get_story_comment_count(story_id)
 
-    connection =
-      Map.put(connection, :total_count, Comments.get_comment_count(%{story_id: story_id}))
-
-    {:ok, connection}
+    query
+    |> Relay.Connection.from_query(&Repo.all/1, args)
+    |> Helpers.transform_connection(total_count: total_count)
   end
 
   @doc """
@@ -107,9 +104,7 @@ defmodule MargaretWeb.Resolvers.Stories do
   @doc """
   Resolves whether the viewer has starred this story.
   """
-  def resolve_viewer_has_starred(
-    %Story{id: story_id}, _, %{context: %{viewer: %{id: viewer_id}}}
-  ) do
+  def resolve_viewer_has_starred(%Story{id: story_id}, _, %{context: %{viewer: %{id: viewer_id}}}) do
     {:ok, Stars.has_starred(%{user_id: viewer_id, story_id: story_id})}
   end
 
@@ -118,9 +113,9 @@ defmodule MargaretWeb.Resolvers.Stories do
   """
   def resolve_viewer_can_bookmark(_, _, %{context: %{viewer: _viewer}}), do: {:ok, true}
 
-  def resolve_viewer_has_bookmarked(
-    %Story{id: story_id}, _, %{context: %{viewer: %{id: viewer_id}}}
-  ) do
+  def resolve_viewer_has_bookmarked(%Story{id: story_id}, _, %{
+        context: %{viewer: %{id: viewer_id}}
+      }) do
     {:ok, Bookmarks.has_bookmarked(%{user_id: viewer_id, story_id: story_id})}
   end
 
@@ -139,18 +134,16 @@ defmodule MargaretWeb.Resolvers.Stories do
   @doc """
   Resolves whether the viewer can delete the story.
   """
-  def resolve_viewer_can_delete(
-    %Story{id: author_id}, _, %{context: %{viewer: %{id: author_id}}}
-  ) do
+  def resolve_viewer_can_delete(%Story{id: author_id}, _, %{context: %{viewer: %{id: author_id}}}) do
     {:ok, true}
   end
 
   @doc """
   Resolves a story creation.
   """
-  def resolve_create_story(
-    %{publication_id: publication_id} = args, %{context: %{viewer: %{id: viewer_id}}}
-  ) do
+  def resolve_create_story(%{publication_id: publication_id} = args, %{
+        context: %{viewer: %{id: viewer_id}}
+      }) do
     # If the user wants to create the story under a publication,
     # we have to check that they have permission.
     publication_id
@@ -188,7 +181,8 @@ defmodule MargaretWeb.Resolvers.Stories do
         |> Stories.can_update_story?(viewer)
         |> do_resolve_update_story(story, attrs)
 
-      _ -> {:error, "Story doesn't exist."}
+      _ ->
+        {:error, "Story doesn't exist."}
     end
   end
 
@@ -211,7 +205,7 @@ defmodule MargaretWeb.Resolvers.Stories do
     end
   end
 
-  defp do_resolve_delete_story(story, viewer) do
+  defp do_resolve_delete_story(%Story{} = story, viewer) do
     story
     |> Stories.can_delete_story?(viewer)
     |> do_resolve_delete_story(story)

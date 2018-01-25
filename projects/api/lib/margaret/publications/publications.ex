@@ -64,9 +64,12 @@ defmodule Margaret.Publications do
   Returns the member count of the publication.
   """
   def get_member_count(publication_id) do
-    query = from pm in PublicationMembership,
-      where: pm.publication_id == ^publication_id,
-      select: count(pm.id)
+    query =
+      from(
+        pm in PublicationMembership,
+        where: pm.publication_id == ^publication_id,
+        select: count(pm.id)
+      )
 
     Repo.one!(query)
   end
@@ -75,9 +78,12 @@ defmodule Margaret.Publications do
   Returns the story count of the publication.
   """
   def get_story_count(publication_id) do
-    query = from s in Story,
-      where: s.publication_id == ^publication_id,
-      select: count(s.id)
+    query =
+      from(
+        s in Story,
+        where: s.publication_id == ^publication_id,
+        select: count(s.id)
+      )
 
     Repo.one!(query)
   end
@@ -168,6 +174,24 @@ defmodule Margaret.Publications do
   end
 
   @doc """
+  Returns true if the user can publish stories for the publication.
+  False otherwise.
+
+  ## Examples
+
+      iex> can_publish_stories?(123, 123)
+      true
+
+      iex> can_publish_stories?(123, 456)
+      false
+
+  """
+  @spec can_publish_stories?(any, any) :: boolean
+  def can_publish_stories?(publication_id, user_id) do
+    check_role(publication_id, user_id, [:owner, :admin, :editor])
+  end
+
+  @doc """
   Returns true if the user can edit stories for the publication.
   False otherwise.
 
@@ -222,66 +246,89 @@ defmodule Margaret.Publications do
   end
 
   @doc """
-  Creates a publication.
+  Inserts a publication.
   """
-  def insert_publication(%{tags: tags} = attrs) do
+  def insert_publication(attrs) do
     Multi.new()
-    |> Multi.run(:tags, fn _ -> {:ok, Tags.insert_and_get_all_tags(tags)} end)
-    |> do_insert_publication(attrs)
-  end
-
-  def insert_publication(attrs), do: do_insert_publication(Multi.new(), attrs)
-
-  defp do_insert_publication(multi, %{owner_id: owner_id} = attrs) do
-    multi
-    |> Multi.run(:publication, &upsert_publication_fn(%Publication{}, attrs, &1))
-    |> Multi.run(:membership, &insert_owner(&1, owner_id))
+    |> maybe_insert_tags(attrs)
+    |> insert_publication(attrs)
+    |> insert_owner(attrs)
     |> Repo.transaction()
   end
 
-  def update_publication(%Publication{} = publication, %{tags: tags} = attrs) do
-    Multi.new()
-    |> Multi.run(:tags, fn _ -> {:ok, Tags.insert_and_get_all_tags(tags)} end)
-    |> do_update_publication(publication, attrs)
+  defp insert_publication(multi, attrs) do
+    insert_publication_fn = fn changes ->
+      maybe_put_tags = fn attrs ->
+        case changes do
+          %{tags: tags} -> Map.put(attrs, :tags, tags)
+          _ -> attrs
+        end
+      end
+
+      attrs
+      |> maybe_put_tags.()
+      |> Publication.changeset()
+      |> Repo.insert()
+    end
+
+    Multi.run(multi, :publication, insert_publication_fn)
   end
 
+  @doc """
+  Updates a publication.
+  """
   def update_publication(%Publication{} = publication, attrs) do
-    do_update_publication(Multi.new(), publication, attrs)
-  end
-
-  defp do_update_publication(multi, publication, attrs) do
-    multi
-    |> Multi.run(:publication, &upsert_publication_fn(publication, attrs, &1))
+    Multi.new()
+    |> maybe_insert_tags(attrs)
+    |> update_publication(publication, attrs)
     |> Repo.transaction()
   end
 
-  defp upsert_publication_fn(publication, attrs, %{tags: tags}) do
-    attrs_with_tags = Map.put(attrs, :tags, tags)
+  defp update_publication(multi, %Publication{} = publication, attrs) do
+    update_publication_fn = fn changes ->
+      maybe_put_tags = fn {publication, attrs} ->
+        case changes do
+          %{tags: tags} -> {Repo.preload(publication, :tags), Map.put(attrs, :tags, tags)}
+          _ -> {publication, attrs}
+        end
+      end
 
-    publication
-    |> Repo.preload(:tags)
-    |> upsert_publication_fn(attrs_with_tags)
+      {publication, attrs} = maybe_put_tags.({publication, attrs})
+
+      publication
+      |> Publication.update_changeset(attrs)
+      |> Repo.update()
+    end
+
+    Multi.run(multi, :publication, update_publication_fn)
   end
 
-  defp upsert_publication_fn(publication, attrs, _), do: upsert_publication_fn(publication, attrs)
+  defp maybe_insert_tags(multi, %{tags: tags}) do
+    insert_tags_fn = fn _ -> {:ok, Tags.insert_and_get_all_tags(tags)} end
 
-  defp upsert_publication_fn(publication, attrs) do
-    publication
-    |> Publication.changeset(attrs)
-    |> Repo.insert_or_update()
+    Multi.run(multi, :tags, insert_tags_fn)
   end
 
-  defp insert_owner(%{publication: %{id: publication_id}}, owner_id) do
-    insert_publication_membership(
-      %{role: :owner, member_id: owner_id, publication_id: publication_id})
+  defp maybe_insert_tags(multi, _attrs), do: multi
+
+  defp insert_owner(multi, %{owner_id: owner_id}) do
+    insert_owner_fn = fn %{publication: %{id: publication_id}} ->
+      insert_publication_membership(%{
+        role: :owner,
+        member_id: owner_id,
+        publication_id: publication_id
+      })
+    end
+
+    Multi.run(multi, :owner, insert_owner_fn)
   end
 
   @doc """
   Creates a publication membership.
   """
   def insert_publication_membership(attrs) do
-    %PublicationMembership{}
-    |> PublicationMembership.changeset(attrs)
+    attrs
+    |> PublicationMembership.changeset()
     |> Repo.insert()
   end
 
@@ -291,9 +338,13 @@ defmodule Margaret.Publications do
   def get_publication_membership(id), do: Repo.get(PublicationMembership, id)
 
   def get_publication_owner(publication_id) do
-    query = from u in User,
-      join: pm in PublicationMembership, on: pm.member_id == u.id,
-      where: pm.publication_id == ^publication_id and pm.role == ^:owner
+    query =
+      from(
+        u in User,
+        join: pm in PublicationMembership,
+        on: pm.member_id == u.id,
+        where: pm.publication_id == ^publication_id and pm.role == ^:owner
+      )
 
     Repo.one!(query)
   end
@@ -327,14 +378,14 @@ defmodule Margaret.Publications do
   Creates a publication invitation.
   """
   def insert_publication_invitation(attrs) do
-    %PublicationInvitation{}
-    |> PublicationInvitation.changeset(attrs)
+    attrs
+    |> PublicationInvitation.changeset()
     |> Repo.insert()
   end
 
   def update_publication_invitation(%PublicationInvitation{} = invitation, attrs) do
     invitation
-    |> PublicationInvitation.changeset(attrs)
+    |> PublicationInvitation.update_changeset(attrs)
     |> Repo.update()
   end
 
@@ -343,20 +394,24 @@ defmodule Margaret.Publications do
   Rejects all other invitations to the invitee.
   """
   def accept_publication_invitation(%PublicationInvitation{} = invitation) do
-    invitation_changeset = PublicationInvitation.changeset(invitation, %{status: :accepted})
-    reject_others_invitations = from i in PublicationInvitation,
-      where: i.invitee_id == ^invitation.invitee_id and i.id != ^invitation.id,
-      where: i.status == ^:pending,
-      update: [set: [status: ^:rejected]]
-    
+    invitation_changeset =
+      PublicationInvitation.update_changeset(invitation, %{status: :accepted})
+
+    reject_others_invitations =
+      from(
+        i in PublicationInvitation,
+        where: i.invitee_id == ^invitation.invitee_id and i.id != ^invitation.id,
+        where: i.status == ^:pending,
+        update: [set: [status: ^:rejected]]
+      )
+
     membership_attrs = %{
       role: invitation.role,
       publication_id: invitation.publication_id,
-      member_id: invitation.invitee_id,
+      member_id: invitation.invitee_id
     }
-    membership_changeset = PublicationMembership.changeset(
-      %PublicationMembership{}, membership_attrs)
 
+    membership_changeset = PublicationMembership.changeset(membership_attrs)
 
     Multi.new()
     |> Multi.update(:invitation, invitation_changeset)

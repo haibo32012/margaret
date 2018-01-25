@@ -26,8 +26,8 @@ defmodule Margaret.Stars do
   Inserts a star.
   """
   def insert_star(attrs) do
-    %Star{}
-    |> Star.changeset(attrs)
+    attrs
+    |> Star.changeset()
     |> Repo.insert()
   end
 
@@ -41,29 +41,44 @@ defmodule Margaret.Stars do
   end
 
   def get_star_count(%{story_id: story_id}) do
-    query = from s in Star,
-      join: u in User, on: u.id == s.user_id,
-      where: s.story_id == ^story_id,
-      where: is_nil(u.deactivated_at),
-      select: count(s.id)
+    query =
+      from(
+        s in Star,
+        join: u in User,
+        on: u.id == s.user_id,
+        where: s.story_id == ^story_id,
+        where: is_nil(u.deactivated_at),
+        select: count(s.id)
+      )
 
     Repo.one!(query)
   end
 
   def get_star_count(%{comment_id: comment_id}) do
-    query = from s in Star,
-      join: u in User, on: u.id == s.user_id,
-      where: s.comment_id == ^comment_id,
-      where: is_nil(u.deactivated_at),
-      select: count(s.id)
+    query =
+      from(
+        s in Star,
+        join: u in User,
+        on: u.id == s.user_id,
+        where: s.comment_id == ^comment_id,
+        where: is_nil(u.deactivated_at),
+        select: count(s.id)
+      )
 
     Repo.one!(query)
   end
 
+  def get_story_star_count(story_id), do: get_star_count(%{story_id: story_id})
+
+  def get_comment_star_count(comment_id), do: get_star_count(%{comment_id: comment_id})
+
   def get_starred_count(user_id) do
-    query = from s in Star,
-      where: s.user_id == ^user_id,
-      select: count(s.id)
+    query =
+      from(
+        s in Star,
+        where: s.user_id == ^user_id,
+        select: count(s.id)
+      )
 
     Repo.one!(query)
   end

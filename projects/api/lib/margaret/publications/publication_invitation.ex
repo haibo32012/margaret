@@ -17,42 +17,52 @@ defmodule Margaret.Publications.PublicationInvitation do
     :inviter_id,
     :publication_id,
     :role,
-    :status,
+    :status
   ]
 
   @required_attrs [
     :invitee_id,
     :inviter_id,
     :publication_id,
-    :role,
+    :role
   ]
 
-  defenum PublicationInvitationStatus,
-    :publication_invitation_status,
-    [:accepted, :pending, :rejected]
+  @update_permitted_attrs [
+    :status
+  ]
 
-  defenum PublicationInvitationRole,
-    :publication_invitation_role,
-    [:writer, :editor, :admin]
+  defenum(PublicationInvitationStatus, :publication_invitation_status, [
+    :accepted,
+    :pending,
+    :rejected
+  ])
+
+  defenum(PublicationInvitationRole, :publication_invitation_role, [:writer, :editor, :admin])
 
   schema "publication_invitations" do
-    belongs_to :invitee, User
-    belongs_to :inviter, User
-    belongs_to :publication, Publication
+    belongs_to(:invitee, User)
+    belongs_to(:inviter, User)
+    belongs_to(:publication, Publication)
 
-    field :role, PublicationInvitationRole
-    field :status, PublicationInvitationStatus
+    field(:role, PublicationInvitationRole)
+    field(:status, PublicationInvitationStatus)
 
     timestamps()
   end
 
   @doc false
-  def changeset(%PublicationInvitation{} = publication_invitation, attrs) do
-    publication_invitation
+  def changeset(attrs) do
+    %PublicationInvitation{}
     |> cast(attrs, @permitted_attrs)
     |> validate_required(@required_attrs)
     |> foreign_key_constraint(:invitee_id)
     |> foreign_key_constraint(:inviter_id)
     |> foreign_key_constraint(:publication_id)
+  end
+
+  @doc false
+  def update_changeset(%PublicationInvitation{} = publication_invitation, attrs) do
+    publication_invitation
+    |> cast(attrs, @update_permitted_attrs)
   end
 end

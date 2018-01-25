@@ -1,6 +1,6 @@
-FROM elixir:1.5.2
+FROM elixir:1.6.0
 
-LABEL name="margaret_api"
+LABEL name="margaret_api_dev"
 LABEL version="1.0.0"
 LABEL maintainer="strattadb@gmail.com"
 
@@ -20,8 +20,7 @@ WORKDIR /usr/src/app
 
 # Install dependencies.
 COPY mix.exs mix.lock ./
-RUN mix deps.get
-RUN mix deps.compile
+RUN mix deps.get && mix compile
 
 # Bundle app source.
 COPY . .

@@ -4,12 +4,12 @@ services:
     build:
       context: ./projects/api
       dockerfile: dev.dockerfile
-    command: tail -f /dev/null
     environment:
       - VIRTUAL_HOST=api.margaret.test
       - VIRTUAL_PORT=4000
 
       - CI
+      - MIX_ENV=test
 
   web:
     build:
