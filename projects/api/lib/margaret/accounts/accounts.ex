@@ -159,15 +159,10 @@ defmodule Margaret.Accounts do
   """
   @spec get_user_by_social_login!({atom, String.t()}) :: User.t() | no_return
   def get_user_by_social_login!({provider, uid}, opts \\ []) do
-    query =
-      from(
-        u in User,
-        join: s in assoc(u, :social_logins),
-        where: s.provider == ^provider and s.uid == ^uid
-      )
-
-    query
+    User
     |> maybe_include_deactivated(opts)
+    |> join(:inner, [u], sl in assoc(u, :social_logins))
+    |> where([..., sl], sl.provider == ^provider and sl.uid == ^uid)
     |> Repo.one!()
   end
 
@@ -182,11 +177,9 @@ defmodule Margaret.Accounts do
   """
   @spec get_user_count :: non_neg_integer
   def get_user_count(opts \\ []) do
-    query = from(u in User, select: count(u.id))
-
-    query
+    User
     |> maybe_include_deactivated(opts)
-    |> Repo.one!()
+    |> Repo.aggregate(:count, :id)
   end
 
   defp maybe_include_deactivated(query, opts) do
@@ -202,6 +195,7 @@ defmodule Margaret.Accounts do
 
   @doc """
   Inserts a user.
+  TODO: Refactor to use Ecto.Multi and send email when creating user.
 
   ## Examples
 
@@ -249,6 +243,8 @@ defmodule Margaret.Accounts do
   When inserting the user, we try to set its username
   to the part before the `@` in the email.
   If it's already taken we take a UUID.
+
+  TODO: Accept more attrs when inserting.
   """
   @spec get_or_insert_user(String.t()) :: User.t()
   def get_or_insert_user(email) do
@@ -276,7 +272,7 @@ defmodule Margaret.Accounts do
 
       {:error, reason} ->
         raise """
-        cannot get or update user.
+        cannot get or insert user.
         Reason: #{inspect(reason)}
         """
     end

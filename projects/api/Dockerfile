@@ -18,12 +18,16 @@ WORKDIR /usr/src/app
 
 # Install dependencies.
 COPY mix.exs mix.lock ./
-RUN mix do deps.get --only prod, deps.compile
+RUN mix do deps.get --only prod \
+    , deps.compile
 
 # Bundle app source.
 COPY . .
 
-RUN mix do compile, release --env=prod --verbose \
+RUN mix do compile \
+    , release --env=prod --verbose \
+    # Alpine Linux doesn't have /opt folder.
+    && mkdir -p /opt \
     && mv _build/prod/rel/${APP_NAME} /opt/release \
     && mv /opt/release/bin/${APP_NAME} /opt/release/bin/start_server
 
