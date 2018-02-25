@@ -46,15 +46,27 @@ config :margaret, MargaretWeb.Guardian,
   issuer: "Margaret",
   secret_key: "Cs+SatzTr/4GlMDYRn+lHQCu+iP7b0hIhr71xDT62J3G+gDb5wlma/UMuxJWOdea"
 
+# Configures Swoosh
+config :margaret, Margaret.Mailer, adapter: Swoosh.Adapters.Local
+
+# Configures Sentry
+config :sentry,
+  dsn: System.get_env("API__SENRTY_DSN"),
+  included_environments: [:prod],
+  environment_name: Mix.env(),
+  enable_source_code_context: true,
+  root_source_code_path: File.cwd!()
+
 # Configures Exq
 config :exq,
   name: Exq,
   host: "127.0.0.1",
   port: 6379,
   namespace: "exq",
-  concurrency: 500,
-  queues: ["user_deletion", "story_publication"],
-  scheduler_enable: true
+  concurrency: 10,
+  queues: ~w(notifications user_deletion),
+  scheduler_enable: true,
+  max_retries: 0
 
 # Configures Elixir's Logger
 config :logger, :console,

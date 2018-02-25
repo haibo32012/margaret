@@ -1,61 +1,58 @@
 defmodule Margaret.Accounts.User do
-  @moduledoc false
+  @moduledoc """
+  The User schema and changesets.
+  """
 
   use Ecto.Schema
-  import Ecto.Changeset
+  import Ecto.{Query, Changeset}
 
   alias __MODULE__
-  alias Margaret.{Accounts, Stories, Stars, Bookmarks}
+
+  alias Margaret.{
+    Repo,
+    Accounts,
+    Publications,
+    Collections.Collection,
+    Stories.Story,
+    Comments.Comment,
+    Stars.Star,
+    Bookmarks.Bookmark
+  }
+
   alias Accounts.{SocialLogin, Follow}
-  alias Stories.Story
-  alias Stars.Star
-  alias Bookmarks.Bookmark
+  alias Publications.{Publication, PublicationMembership}
 
   @type t :: %User{}
 
-  @permitted_attrs [
-    :username,
-    :email,
-    :is_admin,
-    :is_employee,
-    :deactivated_at
-  ]
-
-  @required_attrs [
-    :username,
-    :email
-  ]
-
-  @update_permitted_attrs [
-    :username,
-    :email,
-    :is_admin,
-    :is_employee,
-    :deactivated_at
-  ]
-
   @username_regex ~r/^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){1,64}$/
-  @username_min_length 2
-  @username_max_length 64
-
-  @email_regex ~r/@/
-  @email_min_length 3
-  @email_max_length 254
+  @email_regex ~r/^[A-Za-z0-9._%+-+']+@[A-Za-z0-9.-]+\.[A-Za-z]{2,32}$/
 
   schema "users" do
     field(:username, :string)
     field(:email, :string)
+
+    field(:bio, :string)
+    field(:website, :string)
+    field(:location, :string)
 
     field(:is_admin, :boolean)
     field(:is_employee, :boolean)
 
     field(:deactivated_at, :naive_datetime)
 
+    # A user can have many social accounts associated (Facebook, GitHub, etc.).
     has_many(:social_logins, SocialLogin)
 
     has_many(:stories, Story, foreign_key: :author_id)
+    has_many(:comments, Comment, foreign_key: :author_id)
+
     has_many(:stars, Star)
     has_many(:bookmarks, Bookmark)
+
+    has_many(:publication_memberships, PublicationMembership, foreign_key: :member_id)
+    many_to_many(:publications, Publication, join_through: PublicationMembership)
+
+    has_many(:collections, Collection, foreign_key: :author_id)
 
     many_to_many(
       :followers,
@@ -74,28 +71,104 @@ defmodule Margaret.Accounts.User do
     timestamps()
   end
 
-  @doc false
+  @doc """
+  Builds a changeset for inserting a user.
+  """
   def changeset(attrs) do
+    permitted_attrs = ~w(
+      username
+      email
+      bio
+      website
+      location
+      is_admin
+      is_employee
+      deactivated_at
+    )a
+
+    required_attrs = ~w(
+      username
+      email
+    )a
+
     %User{}
-    |> cast(attrs, @permitted_attrs)
-    |> validate_required(@required_attrs)
+    |> cast(attrs, permitted_attrs)
+    |> validate_required(required_attrs)
     |> validate_format(:username, @username_regex)
-    |> validate_length(:username, min: @username_min_length, max: @username_max_length)
     |> validate_format(:email, @email_regex)
-    |> validate_length(:email, min: @email_min_length, max: @email_max_length)
     |> unique_constraint(:username)
     |> unique_constraint(:email)
   end
 
-  @doc false
+  @doc """
+  Builds a changeset for updating a user.
+  """
   def update_changeset(%User{} = user, attrs) do
+    permitted_attrs = ~w(
+      username
+      email
+      bio
+      website
+      location
+      is_admin
+      is_employee
+      deactivated_at
+    )a
+
     user
-    |> cast(attrs, @update_permitted_attrs)
+    |> cast(attrs, permitted_attrs)
     |> validate_format(:username, @username_regex)
-    |> validate_length(:username, min: @username_min_length, max: @username_max_length)
     |> validate_format(:email, @email_regex)
-    |> validate_length(:email, min: @email_min_length, max: @email_max_length)
     |> unique_constraint(:username)
     |> unique_constraint(:email)
   end
+
+  @doc """
+  Returns `true` if the string is a valid username.
+  """
+  @spec valid_username?(String.t()) :: boolean
+  def valid_username?(username), do: String.match?(username, @username_regex)
+
+  @doc """
+  Excludes deactivated users from the query.
+
+  ## Examples
+
+      iex> from(u in User, where: u.is_admin) |> active()
+      #Ecto.Query<...>
+
+  """
+  @spec active(Ecto.Query.t()) :: Ecto.Query.t()
+  def active(query \\ User), do: where(query, [..., u], is_nil(u.deactivated_at))
+
+  @doc """
+  Filters out non-admin users from the query.
+
+  ## Examples
+
+      iex> User |> admin()
+      #Ecto.Query<...>
+
+  """
+  def admin(query \\ User), do: where(query, [..., u], u.is_admin)
+
+  @doc """
+  Filters out non-employee users from the query.
+
+  ## Examples
+
+      iex> User |> employee()
+      #Ecto.Query<...>
+
+  """
+  def employee(query \\ User), do: where(query, [..., u], u.is_employee)
+
+  @doc """
+  Preloads the social logins of a user.
+  """
+  @spec preload_social_logins(t) :: t
+  def preload_social_logins(%User{} = user), do: Repo.preload(user, :social_logins)
+
+  @spec preload_social_logins(Ecto.Query.t()) :: Ecto.Query.t()
+  def preload_social_logins(%Ecto.Query{} = query), do: preload(query, [..., u], :social_logins)
 end

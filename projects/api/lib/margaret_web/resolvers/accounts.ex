@@ -1,19 +1,32 @@
 defmodule MargaretWeb.Resolvers.Accounts do
   @moduledoc """
   The Account GraphQL resolvers.
+  TODO: Try to clean up queries using defined API instead.
   """
 
   import Ecto.Query
   alias Absinthe.Relay
 
   alias MargaretWeb.Helpers
-  alias Margaret.{Repo, Accounts, Stories, Comments, Publications, Stars, Bookmarks}
-  alias Accounts.{User, Follow}
+
+  alias Margaret.{
+    Repo,
+    Accounts,
+    Follows,
+    Stories,
+    Publications,
+    Stars,
+    Bookmarks,
+    Notifications
+  }
+
+  alias Accounts.User
+  alias Follows.Follow
   alias Stories.Story
-  alias Comments.Comment
   alias Publications.{Publication, PublicationMembership}
   alias Stars.Star
   alias Bookmarks.Bookmark
+  alias Notifications.{Notification, UserNotification}
 
   @doc """
   Resolves the currently logged in user.
@@ -23,7 +36,11 @@ defmodule MargaretWeb.Resolvers.Accounts do
   @doc """
   Resolves a user by its username.
   """
-  def resolve_user(%{username: username}, _), do: {:ok, Accounts.get_user_by_username(username)}
+  def resolve_user(%{username: username}, _) do
+    user = Accounts.get_user_by_username(username)
+
+    {:ok, user}
+  end
 
   @doc """
   Resolves a connection of stories of a user.
@@ -31,23 +48,26 @@ defmodule MargaretWeb.Resolvers.Accounts do
   The author can see their unlisted stories and drafts,
   other users only can see their public stories.
   """
-  def resolve_stories(%User{id: author_id}, args, %{context: %{viewer: %{id: viewer_id}}})
-      when author_id === viewer_id do
-    query = from(s in Story, where: s.author_id == ^author_id)
+  def resolve_stories(%User{id: author_id} = user, args, %{context: %{viewer: %{id: author_id}}}) do
+    query = Story.by_author(user)
+    total_count = Accounts.get_story_count(user)
 
-    Relay.Connection.from_query(query, &Repo.all/1, args)
+    query
+    |> Relay.Connection.from_query(&Repo.all/1, args)
+    |> Helpers.transform_connection(total_count: total_count)
   end
 
-  def resolve_stories(%User{id: author_id}, args, _) do
+  def resolve_stories(user, args, _) do
     query =
-      from(
-        s in Story,
-        where: s.author_id == ^author_id,
-        where: s.audience == ^:all,
-        where: s.published_at >= ^NaiveDateTime.utc_now()
-      )
+      user
+      |> Story.by_author()
+      |> Story.public()
 
-    Relay.Connection.from_query(query, &Repo.all/1, args)
+    total_count = Accounts.get_story_count(user, public_only: true)
+
+    query
+    |> Relay.Connection.from_query(&Repo.all/1, args)
+    |> Helpers.transform_connection(total_count: total_count)
   end
 
   @doc """
@@ -55,7 +75,7 @@ defmodule MargaretWeb.Resolvers.Accounts do
 
   Also resolves the `followed_at` attribute.
   """
-  def resolve_followers(%User{id: user_id}, args, _) do
+  def resolve_followers(%User{id: user_id} = user, args, _) do
     query =
       from(
         u in User,
@@ -63,101 +83,51 @@ defmodule MargaretWeb.Resolvers.Accounts do
         on: f.follower_id == u.id,
         where: is_nil(u.deactivated_at),
         where: f.user_id == ^user_id,
-        select: {u, f.inserted_at}
+        select: {u, %{followed_at: f.inserted_at}}
       )
 
-    {:ok, connection} = Relay.Connection.from_query(query, &Repo.all/1, args)
+    total_count = Accounts.get_follower_count(user)
 
-    transform_edges =
-      &Enum.map(&1, fn %{node: {node, followed_at}} = edge ->
-        edge
-        |> Map.put(:followed_at, followed_at)
-        |> Map.update!(:node, fn _ -> node end)
-      end)
-
-    connection =
-      connection
-      |> Map.update!(:edges, transform_edges)
-      |> Map.put(:total_count, Accounts.get_follower_count(%{user_id: user_id}))
-
-    {:ok, connection}
+    query
+    |> Relay.Connection.from_query(&Repo.all/1, args)
+    |> Helpers.transform_connection(total_count: total_count)
   end
 
   @doc """
   Resolves the connection of followees of a user.
   """
-  def resolve_followees(%User{id: user_id}, args, _) do
+  def resolve_followees(user, args, _) do
     query =
-      from(
-        f in Follow,
-        left_join: u in User,
-        on: u.id == f.user_id,
-        left_join: p in Publication,
-        on: p.id == f.publication_id,
-        where: f.follower_id == ^user_id,
-        where: is_nil(u.deactivated_at),
-        select: {u, p, f.inserted_at}
-      )
+      Follow
+      |> Follow.by_follower(user)
+      |> join(:left, [f], u in assoc(f, :user))
+      |> User.active()
+      |> join(:left, [f], p in assoc(f, :publication))
+      |> select([f, u, p], {[u, p], %{followed_at: f.inserted_at}})
 
-    {:ok, connection} = Relay.Connection.from_query(query, &Repo.all/1, args)
+    total_count = Follows.get_followee_count(user)
 
-    transform_edges =
-      &Enum.map(&1, fn
-        %{node: {user, nil, followed_at}} = edge ->
-          edge
-          |> Map.put(:followed_at, followed_at)
-          |> Map.update!(:node, fn _ -> user end)
-
-        %{node: {nil, publication, followed_at}} = edge ->
-          edge
-          |> Map.put(:followed_at, followed_at)
-          |> Map.update!(:node, fn _ -> publication end)
-      end)
-
-    connection =
-      connection
-      |> Map.update!(:edges, transform_edges)
-      |> Map.put(:total_count, Accounts.get_followee_count(user_id))
-
-    {:ok, connection}
+    query
+    |> Relay.Connection.from_query(&Repo.all/1, args)
+    |> Helpers.transform_connection(total_count: total_count)
   end
 
   @doc """
   Resolves the connection of starrables the user starred.
   """
-  def resolve_starred(%User{id: user_id}, args, _) do
+  def resolve_starred(user, args, _) do
     query =
-      from(
-        star in Star,
-        left_join: story in Story,
-        on: story.id == star.story_id,
-        left_join: comment in Comment,
-        on: comment.id == star.comment_id,
-        where: star.user_id == ^user_id,
-        select: {story, comment, star.inserted_at}
-      )
+      Star
+      |> Star.by_user(user)
+      |> join(:left, [star], story in assoc(star, :story))
+      |> join(:left, [star], comment in assoc(star, :comment))
+      |> select([star, story, comment], {[story, comment], %{starred_at: star.inserted_at}})
 
-    {:ok, connection} = Relay.Connection.from_query(query, &Repo.all/1, args)
+    total_count = Stars.get_starred_count(user)
 
-    transform_edges =
-      &Enum.map(&1, fn
-        %{node: {story, nil, starred_at}} = edge ->
-          edge
-          |> Map.put(:followed_at, starred_at)
-          |> Map.update!(:node, fn _ -> story end)
-
-        %{node: {nil, comment, starred_at}} = edge ->
-          edge
-          |> Map.put(:followed_at, starred_at)
-          |> Map.update!(:node, fn _ -> comment end)
-      end)
-
-    connection =
-      connection
-      |> Map.update!(:edges, transform_edges)
-      |> Map.put(:total_count, Stars.get_starred_count(user_id))
-
-    {:ok, connection}
+    query
+    |> Relay.Connection.from_query(&Repo.all/1, args)
+    |> Helpers.transform_connection(total_count: total_count)
   end
 
   @doc """
@@ -165,43 +135,26 @@ defmodule MargaretWeb.Resolvers.Accounts do
 
   Bookmarks are only visible to the user who bookmarked.
   """
-  def resolve_bookmarked(%User{id: user_id}, args, %{context: %{viewer: %{id: user_id}}}) do
+  def resolve_bookmarked(%User{id: user_id} = user, args, %{context: %{viewer: %{id: user_id}}}) do
     query =
-      from(
-        b in Bookmark,
-        left_join: s in Story,
-        on: s.id == b.story_id,
-        left_join: c in Comment,
-        on: c.id == b.comment_id,
-        where: b.user_id == ^user_id,
-        select: {s, c, b.inserted_at}
-      )
+      Bookmark
+      |> Bookmark.by_user(user)
+      |> join(:left, [b], s in assoc(b, :story))
+      |> join(:left, [b], c in assoc(b, :comment))
+      |> select([b, s, c], {[s, c], %{bookmarked_at: b.inserted_at}})
 
-    {:ok, connection} = Relay.Connection.from_query(query, &Repo.all/1, args)
+    total_count = Bookmarks.get_bookmarked_count(user)
 
-    transform_edges =
-      &Enum.map(&1, fn
-        %{node: {story, nil, bookmarked_at}} = edge ->
-          edge
-          |> Map.put(:followed_at, bookmarked_at)
-          |> Map.update!(:node, fn _ -> story end)
-
-        %{node: {nil, comment, bookmarked_at}} = edge ->
-          edge
-          |> Map.put(:followed_at, bookmarked_at)
-          |> Map.update!(:node, fn _ -> comment end)
-      end)
-
-    connection =
-      connection
-      |> Map.update!(:edges, transform_edges)
-      |> Map.put(:total_count, Bookmarks.get_bookmarked_count(user_id))
-
-    {:ok, connection}
+    query
+    |> Relay.Connection.from_query(&Repo.all/1, args)
+    |> Helpers.transform_connection(total_count: total_count)
   end
 
   def resolve_bookmarked(_, _, _), do: {:ok, nil}
 
+  @doc """
+  Resolves a publication of the user.
+  """
   def resolve_publication(%User{id: user_id}, %{name: publication_name}, _) do
     query =
       from(
@@ -211,55 +164,56 @@ defmodule MargaretWeb.Resolvers.Accounts do
         where: pm.member_id == ^user_id and p.name == ^publication_name
       )
 
-    {:ok, Repo.one(query)}
+    publication = Repo.one(query)
+
+    {:ok, publication}
   end
 
-  def resolve_publications(%User{id: user_id}, args, _) do
+  @doc """
+  Resolves the publications of the user.
+  """
+  def resolve_publications(user, args, _) do
     query =
-      from(
-        p in Publication,
-        join: pm in PublicationMembership,
-        on: pm.publication_id == p.id,
-        where: pm.member_id == ^user_id,
-        select: {p, pm.role, pm.inserted_at}
-      )
+      Publication
+      |> join(:inner, [p], pm in assoc(p, :publication_memberships))
+      |> PublicationMembership.by_member(user)
+      |> select([p, pm], {p, %{role: pm.role, member_since: pm.inserted_at}})
 
-    {:ok, connection} = Relay.Connection.from_query(query, &Repo.all/1, args)
+    total_count = Accounts.get_publication_count(user)
 
-    transform_edges =
-      &Enum.map(&1, fn %{node: {node, role, member_since}} = edge ->
-        edge
-        |> Map.put(:member_since, member_since)
-        |> Map.put(:role, role)
-        |> Map.update!(:node, fn _ -> node end)
-      end)
-
-    connection =
-      connection
-      |> Map.update!(:edges, transform_edges)
-      |> Map.put(:total_count, Accounts.get_publication_count(user_id))
-
-    {:ok, connection}
+    query
+    |> Relay.Connection.from_query(&Repo.all/1, args)
+    |> Helpers.transform_connection(total_count: total_count)
   end
 
-  def resolve_notifications(%User{id: user_id}, _, %{context: %{viewer: %{id: viewer_id}}})
-      when user_id !== viewer_id do
-    {:ok, nil}
+  @doc """
+  Resolves the notifications of the user.
+  """
+  def resolve_notifications(%User{id: user_id} = user, args, %{context: %{viewer: %{id: user_id}}}) do
+    query =
+      Notification
+      |> join(:inner, [n], un in assoc(n, :user_notifications))
+      |> UserNotification.by_user(user)
+
+    total_count = Notifications.get_notification_count(user)
+
+    query
+    |> Relay.Connection.from_query(&Repo.all/1, args)
+    |> Helpers.transform_connection(total_count: total_count)
   end
 
-  def resolve_notifications(_, _), do: {:ok, nil}
+  def resolve_notifications(_, _, _), do: {:ok, nil}
 
   @doc """
   Resolves a connection of users.
   """
   def resolve_users(args, _) do
-    query = from(u in User, where: is_nil(u.deactivated_at))
+    query = User.active()
+    total_count = Accounts.get_user_count()
 
-    {:ok, connection} = Relay.Connection.from_query(query, &Repo.all/1, args)
-
-    connection = Map.put(connection, :total_count, Accounts.get_user_count())
-
-    {:ok, connection}
+    query
+    |> Relay.Connection.from_query(&Repo.all/1, args)
+    |> Helpers.transform_connection(total_count: total_count)
   end
 
   @doc """
@@ -275,8 +229,13 @@ defmodule MargaretWeb.Resolvers.Accounts do
     do_resolve_update_user(viewer, attrs)
   end
 
+  @doc """
+  Resolves teh deactivation of the user.
+  """
   def resolve_deactivate_viewer(_, %{context: %{viewer: viewer}}) do
-    do_resolve_update_user(viewer, %{deactivated_at: NaiveDateTime.utc_now()})
+    now = NaiveDateTime.utc_now()
+
+    do_resolve_update_user(viewer, %{deactivated_at: now})
   end
 
   defp do_resolve_update_user(user, attrs) do
@@ -286,35 +245,40 @@ defmodule MargaretWeb.Resolvers.Accounts do
     end
   end
 
+  @doc """
+  Resolves the mark of the viewer for deletion.
+  """
   def resolve_mark_viewer_for_deletion(_, %{context: %{viewer: viewer}}) do
     case Accounts.mark_user_for_deletion(viewer) do
       {:ok, _} -> {:ok, %{viewer: viewer}}
-      {:error, _, _, _} -> Helpers.GraphQLErrors.something_went_wrong()
+      {:error, _, changeset, _} -> {:error, changeset}
     end
   end
 
   @doc """
   Resolves if the user is the viewer.
   """
-  def resolve_is_viewer(%User{id: user_id}, _, %{context: %{viewer: %{id: viewer_id}}})
-      when user_id === viewer_id do
+  def resolve_is_viewer(%User{id: user_id}, _, %{context: %{viewer: %{id: user_id}}}) do
     {:ok, true}
   end
 
-  def resolve_viewer_can_follow(%User{id: user_id}, _, %{context: %{viewer: %{id: viewer_id}}})
-      when user_id === viewer_id do
-    {:ok, false}
+  def resolve_is_viewer(_, _, _), do: {:ok, false}
+
+  @doc """
+  Resolves if the viewer can follow the user.
+  """
+  def resolve_viewer_can_follow(user, _, %{context: %{viewer: viewer}}) do
+    can_follow = Follows.can_follow?(follower: viewer, user: user)
+
+    {:ok, can_follow}
   end
 
-  def resolve_viewer_can_follow(%User{id: user_id}, _, %{context: %{viewer: %{id: viewer_id}}})
-      when user_id !== viewer_id do
-    {:ok, true}
-  end
+  @doc """
+  Resolves whether the viewer has followed this user.
+  """
+  def resolve_viewer_has_followed(user, _, %{context: %{viewer: viewer}}) do
+    has_followed = Follows.has_followed?(follower: viewer, user: user)
 
-  def resolve_viewer_has_followed(%User{id: user_id}, _, %{context: %{viewer: %{id: viewer_id}}}) do
-    case Accounts.get_follow(%{follower_id: viewer_id, user_id: user_id}) do
-      %Follow{} -> {:ok, true}
-      _ -> {:ok, false}
-    end
+    {:ok, has_followed}
   end
 end

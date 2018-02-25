@@ -6,7 +6,6 @@ defmodule MargaretWeb.AuthController do
   use MargaretWeb, :controller
 
   alias Margaret.Accounts
-  alias Accounts.User
 
   plug(Ueberauth)
 
@@ -15,59 +14,68 @@ defmodule MargaretWeb.AuthController do
   The Ueberauth strategies intercept the connection before it reaches this action
   and redirect to the Authorization Server.
   """
-  def request(_conn, _params), do: nil
+  def request(conn, _params), do: send_resp(conn, 400, "")
 
+  @doc """
+  Callback handler for OAuth2 redirects.
+  """
   def callback(%{assigns: %{ueberauth_failure: _fails}} = conn, _params) do
-    conn
+    # If something failed on their side we can't do anything.
+    send_resp(conn, 500, "")
   end
 
   def callback(%{assigns: %{ueberauth_auth: %{provider: provider, uid: uid}}} = conn, _params) do
-    json(conn, %{token: get_token(conn, to_string(provider), to_string(uid))})
-  end
-
-  @spec get_token(%Plug.Conn{} | String.t(), String.t(), String.t()) :: Guardian.Token.token()
-  defp get_token(%Plug.Conn{} = conn, provider, uid) do
     %{"email" => email} = conn.assigns.ueberauth_auth.extra.raw_info.user
+    social_credentials = {to_string(provider), to_string(uid)}
 
-    try do
-      {:ok, token, _} =
-        {provider, uid}
-        |> Accounts.get_user_by_social_login!(include_deactivated: true)
-        |> activate_user()
-        |> MargaretWeb.Guardian.encode_and_sign()
+    token = get_token(email, social_credentials)
 
-      token
-    rescue
-      _ -> get_token(email, provider, uid)
-    end
+    json(conn, %{token: token})
   end
 
-  defp get_token(email, provider, uid) when is_binary(email) do
-    user = get_or_create_user(email)
+  @spec get_token(String.t(), Accounts.social_credentials()) :: Guardian.Token.token()
+  defp get_token(email, social_credentials) do
+    get_user_and_get_token!(social_credentials)
+  rescue
+    _ -> insert_user_and_get_token!(email, social_credentials)
+  end
 
-    Accounts.insert_social_login!(%{provider: provider, uid: uid, user_id: user.id})
+  defp get_user_and_get_token!(social_credentials) do
+    {:ok, token, _} =
+      social_credentials
+      |> Accounts.get_user_by_social_login!(include_deactivated: true)
+      |> Accounts.activate_user!()
+      |> MargaretWeb.Guardian.encode_and_sign()
+
+    token
+  end
+
+  @spec insert_user_and_get_token!(String.t(), Accounts.social_credentials()) ::
+          Guardian.Token.token()
+  defp insert_user_and_get_token!(email, social_credentials) do
+    user =
+      email
+      |> Accounts.get_or_insert_user!()
+      |> Accounts.activate_user!()
+
+    Accounts.link_user_to_social_login!(user, social_credentials)
 
     {:ok, token, _} = MargaretWeb.Guardian.encode_and_sign(user)
 
     token
   end
 
-  @spec get_or_create_user(String.t()) :: User.t()
-  defp get_or_create_user(email) do
-    {:ok, user} =
-      case Accounts.get_user_by_email(email, include_deactivated: true) do
-        %User{} = user -> {:ok, activate_user(user)}
-        nil -> Accounts.insert_user(%{username: UUID.uuid4(), email: email})
-      end
-
-    user
+  @doc """
+  Refreshes a JWT token.
+  """
+  def refresh(conn, %{token: token}) do
+    token
+    |> MargaretWeb.Guardian.refresh()
+    |> do_refresh(conn)
   end
 
-  defp activate_user(%User{deactivated_at: deactivated_at} = user) when not is_nil(deactivated_at) do
-    {:ok, user} = Accounts.update_user(user, %{deactivated_at: nil})
+  defp do_refresh({:ok, _old, {new_token, _new_claims}}, conn),
+    do: json(conn, %{token: new_token})
 
-    user
-  end
-
-  defp activate_user(user), do: user
+  defp do_refresh({:error, reason}, conn), do: send_resp(conn, 401, reason)
 end

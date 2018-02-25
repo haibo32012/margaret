@@ -6,8 +6,14 @@ defmodule Margaret.Comments do
   import Ecto.Query
   alias Margaret.Repo
 
-  alias Margaret.{Accounts, Stories, Comments}
+  alias Margaret.{
+    Accounts,
+    Stories,
+    Comments
+  }
+
   alias Accounts.User
+  alias Stories.Story
   alias Comments.Comment
 
   @doc """
@@ -43,29 +49,41 @@ defmodule Margaret.Comments do
   def get_comment!(id), do: Repo.get!(Comment, id)
 
   @doc """
+  Gets the story of a comment.
+  """
+  @spec get_story(Comment.t()) :: Story.t()
+  def get_story(%Comment{} = comment) do
+    comment
+    |> Comment.preload_story()
+    |> Map.get(:story)
+  end
+
+  @doc """
+  Gets the author of a comment.
+  """
+  @spec get_author(Comment.t()) :: User.t()
+  def get_author(%Comment{} = comment) do
+    comment
+    |> Comment.preload_author()
+    |> Map.get(:author)
+  end
+
+  @doc """
+  Gets the parent of a comment.
+  """
+  @spec get_parent(Comment.t()) :: User.t()
+  def get_parent(%Comment{} = comment) do
+    comment
+    |> Comment.preload_parent()
+    |> Map.get(:parent)
+  end
+
+  @doc """
   Gets the comment count of a commentable.
 
   ## Examples
 
-      iex> get_comment_count(%{story_id: 123})
-      42
-
-      iex> get_comment_count(%{comment_id: 234})
-      815
-
-  """
-  def get_comment_count(%{story_id: story_id}) do
-    query = from(c in Comment, where: c.story_id == ^story_id)
-
-    do_get_comment_count(query)
-  end
-
-  def get_comment_count(%{comment_id: comment_id}) do
-    query = from(c in Comment, where: c.parent_id == ^comment_id)
-
-    do_get_comment_count(query)
-  end
-
+<<<<<<< HEAD
   def get_comment_count(comment_id: comment_id) do
     query = from c in Comment,
       join: u in User, on: u.id == c.author_id,
@@ -84,23 +102,53 @@ defmodule Margaret.Comments do
 
     Repo.one!(query)
   end
+=======
+      iex> get_comment_count([story: %Story{}])
+      815
+>>>>>>> 72c3be339335c278d767905641e321cdf69f6db0
 
-  def get_story_comment_count(story_id), do: get_comment_count(%{story_id: story_id})
+      iex> get_comment_count([comment: %Comment{}])
+      42
 
-  def get_comment_comment_count(comment_id), do: get_comment_count(%{comment_id: comment_id})
+  """
+  @spec get_comment_count(Keyword.t()) :: non_neg_integer
+  def get_comment_count(clauses) do
+    query =
+      cond do
+        Keyword.has_key?(clauses, :story) ->
+          clauses
+          |> Keyword.get(:story)
+          |> Comment.by_story()
 
-  def can_see_comment?(%Comment{story_id: story_id}, %User{} = user) do
-    story_id
-    |> Stories.get_story()
+        Keyword.has_key?(clauses, :comment) ->
+          clauses
+          |> Keyword.get(:comment)
+          |> Comment.by_parent()
+      end
+
+    query
+    |> join(:inner, [c], u in assoc(c, :author))
+    |> User.active()
+    |> Repo.aggregate(:count, :id)
+  end
+
+  @doc """
+  Returns `true` if the user can see the comment.
+  `false` otherwise.
+  """
+  @spec can_see_comment?(Comment.t(), User.t()) :: boolean
+  def can_see_comment?(%Comment{} = comment, %User{} = user) do
+    comment
+    |> get_story()
     |> Stories.can_see_story?(user)
   end
 
   @doc """
-  Creates a comment.
+  Inserts a comment.
   """
-  def create_comment(attrs) do
-    %Comment{}
-    |> Comment.changeset(attrs)
+  def insert_comment(attrs) do
+    attrs
+    |> Comment.changeset()
     |> Repo.insert()
   end
 
@@ -116,7 +164,5 @@ defmodule Margaret.Comments do
   @doc """
   Deletes a comment.
   """
-  def delete_comment(id) do
-    Repo.delete(%Comment{id: id})
-  end
+  def delete_comment(%Comment{} = comment), do: Repo.delete(comment)
 end

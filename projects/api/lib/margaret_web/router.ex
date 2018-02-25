@@ -1,5 +1,7 @@
 defmodule MargaretWeb.Router do
   use MargaretWeb, :router
+  use Plug.ErrorHandler
+  use Sentry.Plug
 
   pipeline :api do
     plug(:accepts, ["json"])
@@ -12,6 +14,8 @@ defmodule MargaretWeb.Router do
 
   scope "/auth", MargaretWeb do
     pipe_through(:api)
+
+    post("/refresh", AuthController, :refresh)
 
     get("/:provider", AuthController, :request)
     get("/:provider/callback", AuthController, :callback)
